@@ -1,3 +1,5 @@
+After downloading project files, the mnist zip file must be unzipped, then the filepath in the main code file has to be changed to where it was unzipped (easiest would be the current folder)
+
 ## MNIST dataset
 
 This project uses the MNIST database of handwritten digits by Yann LeCun,
