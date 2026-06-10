@@ -1,9 +1,11 @@
 import numpy as np
 from MNIST_reader import MnistDataloader
 from os.path import join
+from NeuronVisualiser import NetworkVisualizer
 
 import tkinter as tk
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # Pixel canvas
@@ -63,7 +65,8 @@ class PixelDrawer:
         predict_button = tk.Button(self.left_frame, text="Predict digit", command=self.predict)
         predict_button.pack(fill="x")
 
-        self.fig, self.ax_bar = plt.subplots(figsize=(8, 5), dpi=100)
+        self.fig = Figure(figsize=(8, 5), dpi=100)
+        self.ax_bar = self.fig.add_subplot(111)
 
         self.mpl_canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.mpl_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -121,7 +124,7 @@ class PixelDrawer:
         self.root.destroy()
 
 # Loads training data
-input_path = r"C:\Users\YOUR_NAME\Downloads\mnist"
+input_path = r"C:\Users\i_hopkirk22\Downloads\mnist"
 
 training_images_filepath = join(input_path, "train-images.idx3-ubyte") 
 training_labels_filepath = join(input_path, "train-labels.idx1-ubyte")
@@ -266,11 +269,18 @@ def main():
     # Inputted data
     # Expects: input_width {int}, hidden_layer_widths {list(int)}, a_funcs {list(str)}, output_width {int}, inputs {list(int)}
     in_width = 784
-    hidden_layer_widths = [64, 128, 64, 32]
+    hidden_layer_widths = [16, 16, 16, 12]
     a_funcs = ["sigmoid", "tanh", "sigmoid", "tanh", "softmax"]
     out_width = 10
 
     nn = NeuralNetwork(in_width, hidden_layer_widths, a_funcs, out_width)
+
+    visualizer = NetworkVisualizer(
+        layer_sizes=[in_width] + hidden_layer_widths + [out_width],
+        max_neurons_per_layer=16
+    )
+
+    visualizer.update(nn.weights)
 
     print("Successfully created neural net\n")
 
@@ -285,9 +295,11 @@ def main():
             image = np.array(image).ravel() / 255.0
             target = nn.one_hot(label)
 
-            total_loss += nn.train(image, target, learning_rate=0.015)
+            total_loss += nn.train(image, target, learning_rate=0.1)
 
         print("epoch:", epoch, "loss:", total_loss / 1000)
+
+        visualizer.update(nn.weights)
 
     mode = int(input("\nWhat do you want to do?\n1: Draw\n2: Use a test image\n\n\t"))
 
@@ -301,6 +313,8 @@ def main():
 
             output = nn.forward(image)
             prediction = np.argmax(output)
+
+            visualizer.update(nn.weights)
 
             fig, (ax_img, ax_bar) = plt.subplots(1, 2, figsize=(8, 3))
 
