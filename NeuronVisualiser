@@ -1,0 +1,136 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+class NetworkVisualizer:
+    def __init__(self, layer_sizes, max_neurons_per_layer=16):
+        self.layer_sizes = layer_sizes
+        self.max_neurons_per_layer = max_neurons_per_layer
+
+        plt.ion()
+
+        self.fig, self.ax = plt.subplots(figsize=(10, 6))
+        self.fig.canvas.manager.set_window_title("Neural Network Visualisation")
+
+        self.positions = self._calculate_positions()
+
+    def _visible_count(self, layer_size):
+        return min(layer_size, self.max_neurons_per_layer)
+
+    def _calculate_positions(self):
+        positions = []
+
+        num_layers = len(self.layer_sizes)
+
+        for layer_index, layer_size in enumerate(self.layer_sizes):
+            visible_neurons = self._visible_count(layer_size)
+
+            x = layer_index * 6
+            y_start = -(visible_neurons - 1) / 2
+
+            layer_positions = []
+
+            for i in range(visible_neurons):
+                y = y_start + i
+                layer_positions.append((x, y))
+
+            positions.append(layer_positions)
+
+        return positions
+
+    def update(self, weights):
+        self.ax.clear()
+
+        self._draw_connections(weights)
+        self._draw_neurons()
+        self._draw_labels()
+
+        self.ax.axis("off")
+        self.ax.set_aspect("equal")
+        self.fig.suptitle("Neural Network weights", fontsize=15, y=0.98)
+
+        self.fig.tight_layout(rect=[0, 0, 1, 0.93])
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+        plt.pause(0.001)
+
+    def _draw_neurons(self):
+        for layer_positions in self.positions:
+            for x, y in layer_positions:
+                circle = plt.Circle((x, y), radius=0.12, fill=False)
+                self.ax.add_patch(circle)
+
+    def _draw_connections(self, weights):
+        for layer_index, weight_matrix in enumerate(weights):
+            previous_positions = self.positions[layer_index]
+            current_positions = self.positions[layer_index + 1]
+
+            visible_current = len(current_positions)
+            visible_previous = len(previous_positions)
+
+            shown_weights = weight_matrix[:visible_current, :visible_previous]
+
+            max_abs_weight = np.max(np.abs(shown_weights))
+
+            if max_abs_weight == 0:
+                max_abs_weight = 1
+
+            for current_i, current_pos in enumerate(current_positions):
+                for previous_i, previous_pos in enumerate(previous_positions):
+                    weight = shown_weights[current_i, previous_i]
+
+                    thickness = 0.2 + 3.0 * abs(weight) / max_abs_weight
+
+                    x1, y1 = previous_pos
+                    x2, y2 = current_pos
+
+                    self.ax.plot(
+                        [x1, x2],
+                        [y1, y2],
+                        linewidth=thickness,
+                        alpha=0.5
+                    )
+
+    def _draw_labels(self):
+        for i, layer_size in enumerate(self.layer_sizes):
+            visible = self._visible_count(layer_size)
+
+            # Use actual x-position of this layer
+            x = self.positions[i][0][0]
+
+            # Find top and bottom visible neuron y positions
+            y_values = [pos[1] for pos in self.positions[i]]
+            y_top = max(y_values)
+            y_bottom = min(y_values)
+
+            if i == 0:
+                label = f"Input\n{layer_size}"
+            elif i == len(self.layer_sizes) - 1:
+                label = f"Output\n{layer_size}"
+            else:
+                label = f"Hidden {i}\n{layer_size}"
+
+            # Main label above the layer
+            self.ax.text(
+                x,
+                y_top + 0.8,
+                label,
+                ha="center",
+                va="bottom",
+                fontsize=10
+            )
+
+            # Ellipsis below if layer is compressed
+            if layer_size > self.max_neurons_per_layer:
+                self.ax.text(
+                    x,
+                    y_bottom - 0.8,
+                    "...",
+                    ha="center",
+                    va="top",
+                    fontsize=16
+                )
+
+    def keep_open(self):
+        plt.ioff()
+        plt.show()
