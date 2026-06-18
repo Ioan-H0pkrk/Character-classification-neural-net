@@ -1,6 +1,6 @@
 import numpy as np
+from random import randrange
 from MNIST_reader import MnistDataloader
-from os.path import join
 from NeuronVisualiser import NetworkVisualizer
 
 import tkinter as tk
@@ -8,9 +8,12 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+import yaml
+import time
+
 # Pixel canvas
 class PixelDrawer:
-    def __init__(self, nn, cell_size=30):
+    def __init__(self, nn, cell_size=15):
         self.nn = nn
 
         self.grid_size = 28
@@ -123,50 +126,87 @@ class PixelDrawer:
         self.root.quit()
         self.root.destroy()
 
-# Loads training data
-input_path = r"C:\Users\i_hopkirk22\Downloads\mnist"
+# Taken from stackoverflow to find the bounding box of non-zero data in a matrix
+def bbox(img: np.ndarray):
+    rows = np.any(img, axis=1)
+    cols = np.any(img, axis=0)
+    ymin, ymax = np.where(rows)[0][[0, -1]]
+    xmin, xmax = np.where(cols)[0][[0, -1]]
+    return img[ymin:ymax+1, xmin:xmax+1]
 
-training_images_filepath = join(input_path, "train-images.idx3-ubyte") 
-training_labels_filepath = join(input_path, "train-labels.idx1-ubyte")
-test_images_filepath = join(input_path, "t10k-images.idx3-ubyte")
-test_labels_filepath = join(input_path, "t10k-labels.idx1-ubyte")
+def randmove(img: np.ndarray):
+    bound_y = img.shape[0]
+    bound_x = img.shape[1]
+    img = bbox(img)
+    img = np.array(img)
 
-mnist_dataloader = MnistDataloader(
-    training_images_filepath,    
-    training_labels_filepath,
-    test_images_filepath,
-    test_labels_filepath
-)
+    row_space = bound_y - img.shape[0]
+    col_space = bound_x - img.shape[1]
 
-x_train, y_train = mnist_dataloader.load_train()
-x_test, y_test = mnist_dataloader.load_test()
-     
+    if row_space == 0:
+        n_cols_left = randrange(0, col_space + 1) # Chooses how many cols to insert to the left
+        n_cols_right = col_space - n_cols_left
+        img = np.pad(img, ((0, 0), (n_cols_left, n_cols_right)), mode="constant")
+        return img
+    elif col_space == 0:
+        n_rows_up = randrange(0, row_space + 1) # Chooses how many rows to insert above
+        n_rows_down = row_space - n_rows_up
+        img = np.pad(img, ((n_rows_up, n_rows_down), (0, 0)), mode="constant")
+        return img
+    elif row_space == 0 and col_space == 0:
+        return img
+    
+    n_rows_up = randrange(0, row_space + 1) # Chooses how many rows to insert above
+    n_cols_left = randrange(0, col_space + 1) # Chooses how many cols to insert to the left
+    n_rows_down = row_space - n_rows_up
+    n_cols_right = col_space - n_cols_left
+
+    img = np.pad(img, ((n_rows_up, n_rows_down), (n_cols_left, n_cols_right)), mode="constant")
+
+    return img
 
 # Neural network class definition
 class NeuralNetwork:
-    def __init__(self, input_width, hidden_layer_widths, a_funcs, output_width):
+    def __init__(self, input_width, hidden_layer_widths, a_funcs, output_width, weights=None, biases=None):
         self.input_width = input_width
         self.hidden_widths = hidden_layer_widths
         self.output_width = output_width
 
         layer_widths = [input_width] + hidden_layer_widths + [output_width]
 
-        self.weights = []
-        self.biases = []
+        expected_layers = len(layer_widths) - 1
+
+        if len(a_funcs) != expected_layers:
+            raise ValueError(
+                f"Expected {expected_layers} activation functions, got {len(a_funcs)}: {a_funcs}"
+            )
+
+        if weights is None or weights == []:
+            self.weights = [
+                np.random.randn(current_width, previous_width) * np.sqrt(2 / previous_width)
+                for previous_width, current_width in zip(layer_widths[:-1], layer_widths[1:])
+            ]
+        else:
+            self.weights = weights
+
+        if biases is None or biases == []:
+            self.biases = [
+                np.zeros(current_width)
+                for current_width in layer_widths[1:]
+            ]
+        else:
+            self.biases = biases
 
         self.activations = []
         self.zs = []
 
-        for previous_width, current_width in zip(layer_widths[:-1], layer_widths[1:]):
-            self.weights.append(np.random.randn(current_width, previous_width))
-            self.biases.append(np.random.randn(current_width))
-        
         a_funcs_dict = {
             "sigmoid": self.sigmoid,
             "relu": self.relu,
             "tanh": np.tanh,
             "softmax": self.softmax
         }
+
         self.a_funcs = [a_funcs_dict[x] for x in a_funcs]
 
         d_funcs_dict = {
@@ -175,6 +215,7 @@ class NeuralNetwork:
             "tanh": self.tanh_derivative,
             "softmax": None
         }
+
         self.d_funcs = [d_funcs_dict[x] for x in a_funcs]
 
     def sigmoid(self, x):
@@ -264,59 +305,183 @@ class NeuralNetwork:
         output = np.clip(output, 1e-12, 1.0 - 1e-12)
         return -np.sum(target * np.log(output))
 
+# Loads training data
+training_images_filepath = "mnist/train-images.idx3-ubyte"
+training_labels_filepath = "mnist/train-labels.idx1-ubyte"
+test_images_filepath = "mnist/t10k-images.idx3-ubyte"
+test_labels_filepath = "mnist/t10k-labels.idx1-ubyte"
+
+mnist_dataloader = MnistDataloader(
+    training_images_filepath,    
+    training_labels_filepath,
+    test_images_filepath,
+    test_labels_filepath
+)
+
+x_train, y_train = mnist_dataloader.load_train()
+x_test, y_test = mnist_dataloader.load_test()
+
+x_train_flat = np.array([np.array(img).ravel() / 255.0 for img in x_train])
+x_test_flat = np.array([np.array(img).ravel() / 255.0 for img in x_test])
+
+# Loads existing values + config file
+config_filepath = "config.yml"
+weights_filepath = "weights.npy"
+biases_filepath = "biases.npy"
 
 def main():
-    # Inputted data
-    # Expects: input_width {int}, hidden_layer_widths {list(int)}, a_funcs {list(str)}, output_width {int}, inputs {list(int)}
-    in_width = 784
-    hidden_layer_widths = [16, 16, 16, 12]
-    a_funcs = ["sigmoid", "tanh", "sigmoid", "tanh", "softmax"]
-    out_width = 10
+    try:
+        with open(config_filepath) as file:
+            config = yaml.safe_load(file)
+    except OSError:
+        with open(config_filepath, 'w') as outfile:
+            data = dict(
+                in_width = 784,
+                hidden_layer_widths = [32, 64, 32, 16],
+                a_funcs = ["sigmoid", "tanh", "sigmoid", "tanh", "softmax"],
+                out_width = 10
+            )
+            config = data
+            yaml.dump(data, outfile, default_flow_style=False)
 
-    nn = NeuralNetwork(in_width, hidden_layer_widths, a_funcs, out_width)
+    weights = []
+    biases = []
+    option = str(input("Load existing neural net (Y/N)? "))
+    match option:
+        case "Y" | "y":
+            in_width = config["in_width"]
+            hidden_layer_widths = config["hidden_layer_widths"]
+            a_funcs = config["a_funcs"]
+            out_width = config["out_width"]
 
-    visualizer = NetworkVisualizer(
-        layer_sizes=[in_width] + hidden_layer_widths + [out_width],
-        max_neurons_per_layer=16
-    )
+            try:
+                weights = np.load(weights_filepath, allow_pickle=True).tolist()
+            except (EOFError, FileNotFoundError):
+                layer_widths = [in_width] + hidden_layer_widths + [out_width]
+                weights = [
+                    np.random.randn(current_width, previous_width) * np.sqrt(2 / previous_width)
+                    for previous_width, current_width in zip(layer_widths[:-1], layer_widths[1:])
+                ]
+                np.save(weights_filepath, np.array(weights, dtype=object), allow_pickle=True)
+            try:
+                biases = np.load(biases_filepath, allow_pickle=True).tolist()
+            except (EOFError, FileNotFoundError):
+                layer_widths = [in_width] + hidden_layer_widths + [out_width]
+                biases = [
+                    np.zeros(current_width)
+                    for current_width in layer_widths[1:]
+                ]
+                np.save(biases_filepath, np.array(biases, dtype=object), allow_pickle=True)
+                
+        case "N" | "n":
+            # Inputted data
+            # Expects: input_width {int}, hidden_layer_widths {list(int)}, a_funcs {list(str)}, output_width {int}, inputs {list(int)}
+            with open(config_filepath, 'w') as outfile:
+                in_width = int(input("In_width: "))
+                hidden_layer_widths = list(map(int, input("Hidden_layer_widths: ").split()))
+                a_funcs = input("Activation_functions: ").split()
+                out_width = int(input("Out_width: "))
 
-    visualizer.update(nn.weights)
+                data = dict(
+                    in_width = in_width,
+                    hidden_layer_widths = hidden_layer_widths,
+                    a_funcs = a_funcs,
+                    out_width = out_width
+                )
+                config = data
 
-    print("Successfully created neural net\n")
+                yaml.dump(data, outfile, default_flow_style=False)
+        
+        case _:
+            raise ValueError("Option must be Y or N")
 
-    target = nn.one_hot(y_train[0])
-    image = np.array(x_train[0]).ravel() / 255.0
+    nn = NeuralNetwork(in_width, hidden_layer_widths, a_funcs, out_width, weights, biases)
+
+    print("Successfully (re)created neural net\n")
+
+    show_visual = True
+    option = str(input("Show neural net visualiser (Y/N)? "))
+
+    match option:
+        case "Y" | "y":
+            visualizer = NetworkVisualizer(
+                layer_sizes=[in_width] + hidden_layer_widths + [out_width],
+                max_neurons_per_layer=16
+            )
+
+            visualizer.update(nn.weights)
+        case "N" | "n":
+            show_visual = False
     
+    epoch_count = int(input("Epoch train count: "))
+    learn_rate = float(input("Learning rate: "))
+    train_count = int(input(f"Training image count, max {len(x_train)}: "))
+    
+    total_start = time.perf_counter()
+
     # An epoch is an entire pass of a training set
-    for epoch in range(20):
+    for epoch in range(epoch_count):
+        epoch_start = time.perf_counter()
+
         total_loss = 0
 
-        for image, label in zip(x_train[:1000], y_train[:1000]):
-            image = np.array(image).ravel() / 255.0
-            target = nn.one_hot(label)
+        indices = np.random.permutation(len(x_train_flat))[:train_count]
 
-            total_loss += nn.train(image, target, learning_rate=0.1)
+        for i in indices:
+            #image = randmove(x_train_flat[i])
+            image = np.array(x_train_flat[i])
 
-        print("epoch:", epoch, "loss:", total_loss / 1000)
+            target = nn.one_hot(y_train[i])
+            total_loss += nn.train(image, target, learning_rate=learn_rate)
 
-        visualizer.update(nn.weights)
+        epoch_time = time.perf_counter() - epoch_start
 
-    mode = int(input("\nWhat do you want to do?\n1: Draw\n2: Use a test image\n\n\t"))
+        print(
+            "epoch:", epoch,
+            "loss:", total_loss / train_count,
+            "time:", round(epoch_time, 2), "s"
+        )
+
+        if show_visual and epoch % 5 == 0: 
+            visualizer.update(nn.weights)
+
+    total_time = time.perf_counter() - total_start
+
+    print("total training time:", round(total_time, 2), "s")
+    print("average epoch time:", round(total_time / epoch_count, 2), "s")
+
+    np.save(weights_filepath, np.array(nn.weights, dtype=object), allow_pickle=True)
+    np.save(biases_filepath, np.array(nn.biases, dtype=object), allow_pickle=True)
+
+    correct = 0
+    total = 1000
+
+    for image, label in zip(x_test[:total], y_test[:total]):
+        image = np.array(image).ravel() / 255.0
+        output = nn.forward(image)
+        prediction = np.argmax(output)
+
+        if prediction == label:
+            correct += 1
+
+    print("test accuracy:", correct / total * 100, "%")
+
+    mode = int(input("\nWhat do you want to do?\n1: Draw a number\n2: Use a test image\n\n\t"))
 
     match mode:
         case 1:
             drawer = PixelDrawer(nn)
             drawer.run()
         case 2:
-            test_n = int(input("Pick a number from 0 to 6000: "))
+            test_n = int(input("Pick a number from 0 to 9999: "))
             image = np.array(x_test[test_n]).ravel() / 255.0
 
             output = nn.forward(image)
             prediction = np.argmax(output)
 
-            visualizer.update(nn.weights)
+            if show_visual: visualizer.update(nn.weights)
 
-            fig, (ax_img, ax_bar) = plt.subplots(1, 2, figsize=(8, 3))
+            _, (ax_img, ax_bar) = plt.subplots(1, 2, figsize=(8, 3))
 
             # Left: test image
             ax_img.imshow(np.array(x_test[test_n]), cmap="gray")
@@ -330,15 +495,16 @@ def main():
             ax_bar.set_xlabel("Digit")
             ax_bar.set_ylabel("Probability")
             ax_bar.set_title(f"Prediction: {np.argmax(output)}")
-
-            plt.tight_layout()
             
             print("prediction:", prediction)
             print("actual:", y_test[test_n])
             print("accuracy:", round(output[y_test[test_n]], 2) * 100, "%")
             print("output:", np.vstack(np.array([x for x in enumerate(output)]).round(2)))
 
+            plt.tight_layout()
             plt.show()
+
+            plt.close("all")
             return
         
 main()
